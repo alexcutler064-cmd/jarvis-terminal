@@ -1,94 +1,182 @@
-def analyze(df):
-    if df is None or len(df) < 90:
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+
+st.set_page_config(page_title="JARVIS Strategy Engine", layout="wide")
+
+st.markdown("""
+<style>
+body { background-color: #05070A; color: #E6E6E6; }
+
+.title {
+    font-size: 42px;
+    font-weight: 800;
+    color: #00f5ff;
+}
+
+.card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(0,245,255,0.15);
+    padding: 14px;
+    border-radius: 14px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("<div class='title'>JARVIS STRATEGY ENGINE</div>", unsafe_allow_html=True)
+st.caption("Backtest + decision filter system (not financial advice)")
+
+# =========================
+# INPUT
+# =========================
+tickers_input = st.text_input("Tickers", "AAPL, MSFT, NVDA, TSLA")
+run = st.button("Run Strategy")
+
+tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+
+# =========================
+# DATA
+# =========================
+@st.cache_data(ttl=300)
+def load(ticker):
+    df = yf.Ticker(ticker).history(period="1y")
+    if df.empty:
         return None
+    return df.reset_index()
 
+def indicators(df):
+    df["SMA20"] = df["Close"].rolling(20).mean()
+    df["SMA50"] = df["Close"].rolling(50).mean()
+    df["RET5"] = df["Close"].pct_change(5)
+    df["VOL"] = df["Close"].pct_change().rolling(10).std()
+    return df
+
+# =========================
+# STRATEGY LOGIC
+# =========================
+def generate_signals(df):
     df = indicators(df)
-    last = df.iloc[-1]
 
-    # =========================
-    # FEATURES
-    # =========================
-    trend = 1 if last["SMA20"] > last["SMA50"] else -1
-    ema_trend = 1 if last["Close"] > last["EMA20"] else -1
+    signals = []
 
-    momentum = last["RET5"] if not np.isnan(last["RET5"]) else 0
-    volatility = last["VOL"] if not np.isnan(last["VOL"]) else 0
+    for i in range(60, len(df)):
+        row = df.iloc[i]
 
-    breakout = last["Close"] > last["HIGH20"]
+        if np.isnan(row["SMA20"]) or np.isnan(row["SMA50"]):
+            continue
 
-    volume_ok = False
-    if not np.isnan(last["VOL_AVG"]):
-        volume_ok = last["Volume"] > last["VOL_AVG"]
+        trend = row["SMA20"] > row["SMA50"]
+        momentum = row["RET5"] if not np.isnan(row["RET5"]) else 0
+        vol = row["VOL"] if not np.isnan(row["VOL"]) else 0
 
-    # =========================
-    # NORMALIZED SCORING (0–100)
-    # =========================
+        buy = trend and momentum > 0 and vol < 0.03
 
-    # trend agreement boost
-    trend_score = 25 if trend == ema_trend else 10
+        signals.append({
+            "date": row["Date"],
+            "close": row["Close"],
+            "buy": buy
+        })
 
-    # momentum scaled safely
-    momentum_score = np.clip(momentum * 200, -25, 25)  # caps noise
+    return pd.DataFrame(signals)
 
-    # volatility penalty (risk control)
-    vol_score = np.clip(30 - volatility * 800, 0, 30)
+# =========================
+# BACKTEST ENGINE
+# =========================
+def backtest(signals):
+    position = 0
+    entry = 0
+    equity = 10000
+    equity_curve = []
 
-    # breakout strength
-    breakout_score = 15 if breakout else 0
+    wins = 0
+    trades = 0
 
-    # volume confirmation
-    volume_score = 10 if volume_ok else 0
+    for i in range(len(signals)):
+        price = signals.iloc[i]["close"]
+        buy = signals.iloc[i]["buy"]
 
-    raw_score = trend_score + momentum_score + vol_score + breakout_score + volume_score
+        if buy and position == 0:
+            position = 1
+            entry = price
+            trades += 1
 
-    score = np.clip(raw_score, 0, 100)
+        elif position == 1:
+            change = (price - entry) / entry
 
-    # =========================
-    # CONFIDENCE MODEL
-    # =========================
+            # exit rule (simple)
+            if change > 0.05 or change < -0.03:
+                equity *= (1 + change)
+                equity_curve.append(equity)
 
-    agreement = (trend == ema_trend)
-    stable_market = volatility < 0.03
+                if change > 0:
+                    wins += 1
 
-    confidence = 0
-    confidence += 40 if agreement else 20
-    confidence += 30 if stable_market else 10
-    confidence += 20 if volume_ok else 10
-    confidence += 10 if breakout else 0
+                position = 0
 
-    confidence = np.clip(confidence, 0, 100)
-
-    # =========================
-    # REGIME
-    # =========================
-    if trend == 1 and momentum > 0:
-        regime = "BULL"
-    elif trend == -1 and momentum < 0:
-        regime = "BEAR"
-    else:
-        regime = "CHOPPY"
-
-    # =========================
-    # SMART SIGNAL ENGINE
-    # =========================
-
-    if score > 75 and confidence > 70 and regime == "BULL":
-        signal = "🟢 HIGH PROBABILITY SETUP"
-    elif score > 60 and confidence > 50:
-        signal = "🟡 VALID SETUP (LOWER QUALITY)"
-    elif regime == "CHOPPY":
-        signal = "🟡 NO EDGE (SKIP)"
-    else:
-        signal = "🔴 AVOID"
+    win_rate = wins / trades if trades > 0 else 0
 
     return {
-        "score": int(score),
-        "confidence": int(confidence),
-        "signal": signal,
-        "regime": regime,
-        "momentum": round(momentum, 4),
-        "volatility": round(volatility, 4),
-        "breakout": breakout,
-        "volume_ok": volume_ok,
-        "df": df
+        "equity": equity,
+        "win_rate": win_rate,
+        "trades": trades,
+        "curve": equity_curve
     }
+
+# =========================
+# RUN
+# =========================
+if run:
+
+    st.markdown("### Running strategy backtest...")
+
+    results = []
+
+    for t in tickers:
+
+        df = load(t)
+
+        if df is None:
+            continue
+
+        signals = generate_signals(df)
+        stats = backtest(signals)
+
+        results.append({
+            "ticker": t,
+            "final_equity": round(stats["equity"], 2),
+            "win_rate": round(stats["win_rate"] * 100, 2),
+            "trades": stats["trades"]
+        })
+
+    results = sorted(results, key=lambda x: x["final_equity"], reverse=True)
+
+    st.markdown("### Strategy Results")
+
+    for r in results:
+        st.markdown(f"""
+        <div class="card">
+            <h3>{r['ticker']}</h3>
+            <p><b>Final Equity:</b> ${r['final_equity']}</p>
+            <p><b>Win Rate:</b> {r['win_rate']}%</p>
+            <p><b>Trades:</b> {r['trades']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # =========================
+    # EQUITY CURVE (BEST TICKER)
+    # =========================
+    best = results[0]["ticker"]
+
+    df = load(best)
+    signals = generate_signals(df)
+    stats = backtest(signals)
+
+    if stats["curve"]:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(y=stats["curve"], name="Equity Curve"))
+        fig.update_layout(template="plotly_dark", height=400)
+
+        st.markdown("### Equity Curve (Best Strategy)")
+        st.plotly_chart(fig, use_container_width=True)
