@@ -3,20 +3,18 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-import time
 
 # =========================
 # PAGE CONFIG
 # =========================
 st.set_page_config(
-    page_title="JARVIS Terminal PRO",
+    page_title="JARVIS Decision Core",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # =========================
-# FUTURISTIC UI
+# DARK INSTITUTIONAL UI
 # =========================
 st.markdown("""
 <style>
@@ -26,22 +24,23 @@ body {
     color: #E6E6E6;
 }
 
-/* top title */
+.block-container {
+    padding: 1.2rem 2rem;
+}
+
 .title {
-    font-size: 42px;
+    font-size: 44px;
     font-weight: 800;
     color: #00f5ff;
-    text-shadow: 0 0 18px rgba(0,245,255,0.3);
+    text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
-/* sub text */
 .sub {
     opacity: 0.6;
-    margin-bottom: 10px;
+    margin-bottom: 15px;
 }
 
-/* glass tile */
-.tile {
+.card {
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(0,245,255,0.12);
     border-radius: 16px;
@@ -49,24 +48,16 @@ body {
     box-shadow: 0 0 18px rgba(0,245,255,0.06);
 }
 
-/* strong tile glow */
-.tile-strong {
-    border: 1px solid rgba(0,255,160,0.4);
-    box-shadow: 0 0 18px rgba(0,255,160,0.15);
+.good {
+    border: 1px solid rgba(0,255,150,0.4);
 }
 
-/* weak tile glow */
-.tile-weak {
+.bad {
     border: 1px solid rgba(255,80,80,0.3);
-    box-shadow: 0 0 18px rgba(255,80,80,0.08);
 }
 
-/* button */
-.stButton > button {
-    background: linear-gradient(90deg, #00f5ff, #6a5cff);
-    color: black;
-    font-weight: 700;
-    border-radius: 10px;
+.warn {
+    border: 1px solid rgba(255,200,0,0.3);
 }
 
 </style>
@@ -75,19 +66,19 @@ body {
 # =========================
 # HEADER
 # =========================
-st.markdown("<div class='title'>JARVIS TRADING TERMINAL PRO</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub'>Live market intelligence system</div>", unsafe_allow_html=True)
+st.markdown("<div class='title'>JARVIS DECISION CORE</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub'>Market regime + risk-based decision system</div>", unsafe_allow_html=True)
 
 # =========================
-# INPUT BAR
+# INPUT
 # =========================
-col1, col2, col3 = st.columns([2,1,1])
+col1, col2 = st.columns([2,1])
 
 with col1:
-    tickers_input = st.text_input("Enter tickers", "AAPL, MSFT, NVDA, TSLA")
+    tickers_input = st.text_input("Tickers", "AAPL, MSFT, NVDA, TSLA")
 
 with col2:
-    run = st.button("SCAN MARKET")
+    run = st.button("RUN ANALYSIS")
 
 tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 
@@ -95,7 +86,7 @@ tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 # DATA
 # =========================
 @st.cache_data(ttl=300)
-def get_data(ticker):
+def load(ticker):
     try:
         df = yf.Ticker(ticker).history(period="6mo")
         if df.empty:
@@ -107,73 +98,101 @@ def get_data(ticker):
 def add_indicators(df):
     df["SMA20"] = df["Close"].rolling(20).mean()
     df["SMA50"] = df["Close"].rolling(50).mean()
-    df["EMA20"] = df["Close"].ewm(span=20).mean()
     df["RET5"] = df["Close"].pct_change(5)
+    df["VOL"] = df["Close"].pct_change().rolling(10).std()
+    df["HIGH20"] = df["Close"].rolling(20).max()
+    df["LOW20"] = df["Close"].rolling(20).min()
     return df
 
 # =========================
-# SCORING ENGINE (UPGRADED FEEL)
+# FINAL DECISION ENGINE
 # =========================
-def score(df):
-    if df is None or len(df) < 60:
+def analyze(df):
+    if df is None or len(df) < 80:
         return None
 
     df = add_indicators(df)
     last = df.iloc[-1]
 
-    s = 0
+    trend_up = last["SMA20"] > last["SMA50"]
+    momentum = last["RET5"] if not np.isnan(last["RET5"]) else 0
+    vol = last["VOL"] if not np.isnan(last["VOL"]) else 0
 
-    if last["SMA20"] > last["SMA50"]:
-        s += 2
+    # Breakout detection
+    breakout = last["Close"] > last["HIGH20"]
 
-    if last["Close"] > last["EMA20"]:
-        s += 1
-
-    if not np.isnan(last["RET5"]):
-        s += last["RET5"] * 10
-
-    if s >= 4:
-        label = "STRONG"
-    elif s >= 2:
-        label = "NEUTRAL"
+    # REGIME
+    if trend_up and momentum > 0:
+        regime = "BULL"
+    elif not trend_up and momentum < 0:
+        regime = "BEAR"
     else:
-        label = "WEAK"
+        regime = "CHOPPY"
 
-    return s, label, df
+    # SCORE MODEL
+    score = 0
+    score += 2 if trend_up else -2
+    score += momentum * 15
+    score -= vol * 40
+    score += 1 if breakout else 0
+
+    # DECISION LOGIC
+    if regime == "BULL" and breakout and vol < 0.03:
+        signal = "🟢 HIGH QUALITY BREAKOUT SETUP"
+        style = "good"
+    elif regime == "BULL":
+        signal = "🟡 WATCH (trend intact)"
+        style = "warn"
+    elif regime == "CHOPPY":
+        signal = "🟡 AVOID NEW TRADES (uncertain structure)"
+        style = "warn"
+    else:
+        signal = "🔴 RISK OFF"
+        style = "bad"
+
+    return {
+        "score": round(score, 2),
+        "signal": signal,
+        "regime": regime,
+        "momentum": round(momentum, 4),
+        "volatility": round(vol, 4),
+        "breakout": breakout,
+        "df": df,
+        "style": style
+    }
 
 # =========================
-# SCAN
+# RUN
 # =========================
 if run:
 
-    st.markdown("### 🧠 JARVIS SCANNING SYSTEM INITIATED")
-
-    progress = st.progress(0)
-
     results = []
+
+    st.markdown("### 🧠 Scanning Market Structure...")
+
+    prog = st.progress(0)
 
     for i, t in enumerate(tickers):
 
-        df = get_data(t)
-        result = score(df)
+        df = load(t)
+        r = analyze(df)
 
-        if result:
-            s, label, df = result
-            price = df["Close"].iloc[-1]
-
+        if r:
             results.append({
                 "ticker": t,
-                "score": round(s,2),
-                "label": label,
-                "price": round(price,2)
+                "score": r["score"],
+                "signal": r["signal"],
+                "regime": r["regime"],
+                "momentum": r["momentum"],
+                "volatility": r["volatility"],
+                "breakout": r["breakout"],
+                "price": round(df["Close"].iloc[-1], 2)
             })
 
-        # fake smooth scan feel
-        progress.progress((i+1)/len(tickers))
-        time.sleep(0.1)
+        prog.progress((i+1)/len(tickers))
 
     if not results:
-        st.error("No data available")
+        st.error("No valid market data")
         st.stop()
 
     results = sorted(results, key=lambda x: x["score"], reverse=True)
@@ -181,39 +200,37 @@ if run:
     top = results[0]
 
     # =========================
-    # TOP STRIP
+    # TOP SUMMARY
     # =========================
     c1, c2, c3 = st.columns(3)
 
-    c1.markdown(f"<div class='tile tile-strong'><h3>TOP ASSET</h3><h2>{top['ticker']}</h2></div>", unsafe_allow_html=True)
-    c2.markdown(f"<div class='tile'><h3>SCORE</h3><h2>{top['score']}</h2></div>", unsafe_allow_html=True)
-    c3.markdown(f"<div class='tile'><h3>SIGNAL</h3><h2>{top['label']}</h2></div>", unsafe_allow_html=True)
+    c1.markdown(f"<div class='card'><h3>TOP ASSET</h3><h2>{top['ticker']}</h2></div>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='card'><h3>SCORE</h3><h2>{top['score']}</h2></div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='card'><h3>REGIME</h3><h2>{top['regime']}</h2></div>", unsafe_allow_html=True)
 
     st.divider()
 
     # =========================
-    # MARKET TILES (THIS IS THE BIG UPGRADE)
+    # MARKET GRID
     # =========================
-    st.markdown("### 📊 Market Grid")
+    st.markdown("### 📊 Market Intelligence Grid")
 
     cols = st.columns(4)
 
     for i, r in enumerate(results):
 
-        style = "tile"
-        if r["label"] == "STRONG":
-            style = "tile tile-strong"
-        elif r["label"] == "WEAK":
-            style = "tile tile-weak"
-
         with cols[i % 4]:
+
             st.markdown(
                 f"""
-                <div class="{style}">
-                    <h4>{r['ticker']}</h4>
-                    <p>Price: {r['price']}</p>
-                    <p>Score: {r['score']}</p>
-                    <p>{r['label']}</p>
+                <div class="card">
+                    <h3>{r['ticker']}</h3>
+                    <p><b>Price:</b> {r['price']}</p>
+                    <p><b>Signal:</b> {r['signal']}</p>
+                    <p><b>Regime:</b> {r['regime']}</p>
+                    <p><b>Momentum:</b> {r['momentum']}</p>
+                    <p><b>Volatility:</b> {r['volatility']}</p>
+                    <p><b>Breakout:</b> {r['breakout']}</p>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -222,13 +239,13 @@ if run:
     st.divider()
 
     # =========================
-    # DETAIL VIEW
+    # DEEP ANALYSIS PANEL
     # =========================
-    st.markdown("### 📈 Deep Analysis Panel")
+    st.markdown("### 📈 Deep Analysis")
 
     pick = st.selectbox("Select asset", [r["ticker"] for r in results])
 
-    df = get_data(pick)
+    df = load(pick)
 
     if df is not None:
         df = add_indicators(df)
@@ -241,18 +258,23 @@ if run:
 
         fig.update_layout(
             template="plotly_dark",
-            height=450,
+            height=500,
             paper_bgcolor="#05070A",
             plot_bgcolor="#05070A"
         )
 
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("### 🧠 JARVIS OUTPUT")
+        match = next(r for r in results if r["ticker"] == pick)
 
-        if top["ticker"] == pick:
-            st.success("Top-ranked asset in current scan")
-        elif top["score"] - next(r["score"] for r in results if r["ticker"] == pick) > 1:
-            st.warning("Below market leaders")
-        else:
-            st.info("Neutral positioning in current structure")
+        st.markdown("### 🧠 Decision Output")
+
+        st.markdown(f"""
+        <div class="card">
+            <h2>{match['signal']}</h2>
+            <p><b>Regime:</b> {match['regime']}</p>
+            <p><b>Score:</b> {match['score']}</p>
+            <p><b>Momentum:</b> {match['momentum']}</p>
+            <p><b>Volatility:</b> {match['volatility']}</p>
+        </div>
+        """, unsafe_allow_html=True)
