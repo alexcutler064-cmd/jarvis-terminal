@@ -4,18 +4,19 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import time
 
 # =========================
-# PAGE SETUP
+# PAGE CONFIG
 # =========================
 st.set_page_config(
-    page_title="JARVIS Terminal v3",
+    page_title="JARVIS Terminal PRO",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # =========================
-# FUTURISTIC DARK THEME
+# FUTURISTIC UI
 # =========================
 st.markdown("""
 <style>
@@ -25,51 +26,47 @@ body {
     color: #E6E6E6;
 }
 
-/* main spacing */
-.block-container {
-    padding: 1rem 1.8rem;
-}
-
-/* TOP TITLE */
+/* top title */
 .title {
     font-size: 42px;
     font-weight: 800;
     color: #00f5ff;
-    text-shadow: 0 0 18px rgba(0,245,255,0.25);
-    letter-spacing: 1px;
+    text-shadow: 0 0 18px rgba(0,245,255,0.3);
 }
 
+/* sub text */
 .sub {
     opacity: 0.6;
-    margin-bottom: 20px;
+    margin-bottom: 10px;
 }
 
-/* GLASS PANEL */
-.panel {
+/* glass tile */
+.tile {
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(0,245,255,0.12);
-    border-radius: 14px;
+    border-radius: 16px;
     padding: 14px;
-    box-shadow: 0 0 18px rgba(0,245,255,0.05);
+    box-shadow: 0 0 18px rgba(0,245,255,0.06);
 }
 
-/* BUTTONS */
+/* strong tile glow */
+.tile-strong {
+    border: 1px solid rgba(0,255,160,0.4);
+    box-shadow: 0 0 18px rgba(0,255,160,0.15);
+}
+
+/* weak tile glow */
+.tile-weak {
+    border: 1px solid rgba(255,80,80,0.3);
+    box-shadow: 0 0 18px rgba(255,80,80,0.08);
+}
+
+/* button */
 .stButton > button {
     background: linear-gradient(90deg, #00f5ff, #6a5cff);
     color: black;
     font-weight: 700;
     border-radius: 10px;
-    border: none;
-}
-
-.stButton > button:hover {
-    transform: scale(1.02);
-    box-shadow: 0 0 15px rgba(0,245,255,0.3);
-}
-
-/* TABLE */
-.dataframe {
-    background-color: #0b0f14 !important;
 }
 
 </style>
@@ -78,30 +75,27 @@ body {
 # =========================
 # HEADER
 # =========================
-st.markdown("<div class='title'>JARVIS TRADING TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub'>Market intelligence system • v3 core build</div>", unsafe_allow_html=True)
+st.markdown("<div class='title'>JARVIS TRADING TERMINAL PRO</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub'>Live market intelligence system</div>", unsafe_allow_html=True)
 
 # =========================
 # INPUT BAR
 # =========================
-colA, colB, colC = st.columns([2, 1, 1])
+col1, col2, col3 = st.columns([2,1,1])
 
-with colA:
-    tickers_input = st.text_input("Enter tickers (comma separated)", "AAPL, MSFT, NVDA, TSLA")
+with col1:
+    tickers_input = st.text_input("Enter tickers", "AAPL, MSFT, NVDA, TSLA")
 
-with colB:
-    scan = st.button("SCAN MARKET 🚀")
-
-with colC:
-    auto = st.checkbox("Live Scan Mode")
+with col2:
+    run = st.button("SCAN MARKET")
 
 tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 
 # =========================
-# DATA LOADER
+# DATA
 # =========================
 @st.cache_data(ttl=300)
-def load_data(ticker):
+def get_data(ticker):
     try:
         df = yf.Ticker(ticker).history(period="6mo")
         if df.empty:
@@ -110,160 +104,155 @@ def load_data(ticker):
     except:
         return None
 
-# =========================
-# INDICATORS
-# =========================
-def indicators(df):
+def add_indicators(df):
     df["SMA20"] = df["Close"].rolling(20).mean()
     df["SMA50"] = df["Close"].rolling(50).mean()
     df["EMA20"] = df["Close"].ewm(span=20).mean()
     df["RET5"] = df["Close"].pct_change(5)
-    df["RET20"] = df["Close"].pct_change(20)
     return df
 
 # =========================
-# SCORING ENGINE (UPGRADED)
+# SCORING ENGINE (UPGRADED FEEL)
 # =========================
-def score_stock(df):
+def score(df):
     if df is None or len(df) < 60:
         return None
 
-    df = indicators(df)
+    df = add_indicators(df)
     last = df.iloc[-1]
 
-    score = 0
+    s = 0
 
-    # trend alignment
     if last["SMA20"] > last["SMA50"]:
-        score += 2
+        s += 2
 
-    # price strength
     if last["Close"] > last["EMA20"]:
-        score += 1
+        s += 1
 
-    # momentum
     if not np.isnan(last["RET5"]):
-        score += last["RET5"] * 8
+        s += last["RET5"] * 10
 
-    if not np.isnan(last["RET20"]):
-        score += last["RET20"] * 5
-
-    # label system
-    if score >= 4:
-        label = "🟢 STRONG"
-    elif score >= 2:
-        label = "🟡 NEUTRAL"
+    if s >= 4:
+        label = "STRONG"
+    elif s >= 2:
+        label = "NEUTRAL"
     else:
-        label = "🔴 WEAK"
+        label = "WEAK"
 
-    return score, label, df
+    return s, label, df
 
 # =========================
-# RUN SCAN
+# SCAN
 # =========================
-if scan or auto:
+if run:
 
-    results = []
-
-    st.markdown("### 🧠 JARVIS CORE ONLINE")
-    st.markdown("Scanning market structure...")
+    st.markdown("### 🧠 JARVIS SCANNING SYSTEM INITIATED")
 
     progress = st.progress(0)
 
+    results = []
+
     for i, t in enumerate(tickers):
 
-        df = load_data(t)
-        result = score_stock(df)
+        df = get_data(t)
+        result = score(df)
 
         if result:
-            score, label, df = result
+            s, label, df = result
             price = df["Close"].iloc[-1]
 
             results.append({
-                "Ticker": t,
-                "Score": round(score, 2),
-                "Signal": label,
-                "Price": round(price, 2)
+                "ticker": t,
+                "score": round(s,2),
+                "label": label,
+                "price": round(price,2)
             })
 
-        progress.progress(int((i+1)/len(tickers)*100))
+        # fake smooth scan feel
+        progress.progress((i+1)/len(tickers))
+        time.sleep(0.1)
 
     if not results:
-        st.error("No market data available.")
+        st.error("No data available")
         st.stop()
 
-    results_df = pd.DataFrame(results).sort_values("Score", ascending=False)
+    results = sorted(results, key=lambda x: x["score"], reverse=True)
+
+    top = results[0]
 
     # =========================
-    # TOP SUMMARY BAR
+    # TOP STRIP
     # =========================
-    top = results_df.iloc[0]
-
     c1, c2, c3 = st.columns(3)
 
-    c1.markdown(f"<div class='panel'><h3>TOP ASSET</h3><h2>{top['Ticker']}</h2></div>", unsafe_allow_html=True)
-    c2.markdown(f"<div class='panel'><h3>SCORE</h3><h2>{top['Score']}</h2></div>", unsafe_allow_html=True)
-    c3.markdown(f"<div class='panel'><h3>SIGNAL</h3><h2>{top['Signal']}</h2></div>", unsafe_allow_html=True)
+    c1.markdown(f"<div class='tile tile-strong'><h3>TOP ASSET</h3><h2>{top['ticker']}</h2></div>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='tile'><h3>SCORE</h3><h2>{top['score']}</h2></div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='tile'><h3>SIGNAL</h3><h2>{top['label']}</h2></div>", unsafe_allow_html=True)
 
     st.divider()
 
     # =========================
-    # MAIN LAYOUT (3 PANEL SYSTEM)
+    # MARKET TILES (THIS IS THE BIG UPGRADE)
     # =========================
-    left, center, right = st.columns([1.2, 2.2, 1.2])
+    st.markdown("### 📊 Market Grid")
 
-    # -------------------------
-    # LEFT PANEL (WATCHLIST)
-    # -------------------------
-    with left:
-        st.markdown("### 📡 Watch Node")
-        st.markdown("<div class='panel'>", unsafe_allow_html=True)
-        st.write("Tracked Assets")
+    cols = st.columns(4)
 
-        st.dataframe(results_df[["Ticker", "Score"]], hide_index=True, use_container_width=True)
+    for i, r in enumerate(results):
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        style = "tile"
+        if r["label"] == "STRONG":
+            style = "tile tile-strong"
+        elif r["label"] == "WEAK":
+            style = "tile tile-weak"
 
-    # -------------------------
-    # CENTER PANEL (MARKET GRID)
-    # -------------------------
-    with center:
-        st.markdown("### 📊 Market Intelligence Grid")
-
-        st.dataframe(results_df, hide_index=True, use_container_width=True)
-
-    # -------------------------
-    # RIGHT PANEL (INSIGHT CORE)
-    # -------------------------
-    with right:
-        st.markdown("### 🧠 Insight Core")
-        st.markdown("<div class='panel'>", unsafe_allow_html=True)
-
-        selected = st.selectbox("Analyze Asset", results_df["Ticker"])
-
-        df = load_data(selected)
-
-        if df is not None:
-            df = indicators(df)
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], name="Price"))
-            fig.add_trace(go.Scatter(x=df["Date"], y=df["SMA20"], name="SMA20"))
-            fig.add_trace(go.Scatter(x=df["Date"], y=df["SMA50"], name="SMA50"))
-
-            fig.update_layout(
-                template="plotly_dark",
-                height=350,
-                paper_bgcolor="#05070A",
-                plot_bgcolor="#05070A"
+        with cols[i % 4]:
+            st.markdown(
+                f"""
+                <div class="{style}">
+                    <h4>{r['ticker']}</h4>
+                    <p>Price: {r['price']}</p>
+                    <p>Score: {r['score']}</p>
+                    <p>{r['label']}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+    st.divider()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    # =========================
+    # DETAIL VIEW
+    # =========================
+    st.markdown("### 📈 Deep Analysis Panel")
 
-# =========================
-# IDLE STATE
-# =========================
-else:
-    st.info("Enter tickers and press SCAN MARKET to activate JARVIS terminal.")
+    pick = st.selectbox("Select asset", [r["ticker"] for r in results])
+
+    df = get_data(pick)
+
+    if df is not None:
+        df = add_indicators(df)
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], name="Price"))
+        fig.add_trace(go.Scatter(x=df["Date"], y=df["SMA20"], name="SMA20"))
+        fig.add_trace(go.Scatter(x=df["Date"], y=df["SMA50"], name="SMA50"))
+
+        fig.update_layout(
+            template="plotly_dark",
+            height=450,
+            paper_bgcolor="#05070A",
+            plot_bgcolor="#05070A"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### 🧠 JARVIS OUTPUT")
+
+        if top["ticker"] == pick:
+            st.success("Top-ranked asset in current scan")
+        elif top["score"] - next(r["score"] for r in results if r["ticker"] == pick) > 1:
+            st.warning("Below market leaders")
+        else:
+            st.info("Neutral positioning in current structure")
